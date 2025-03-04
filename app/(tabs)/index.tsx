@@ -1,3 +1,5 @@
+declare module 'react-native-image-to-pdf';
+
 import { Image, StyleSheet, Platform, View } from 'react-native';
 import { WebView } from 'react-native-webview';
 import * as FileSystem from 'expo-file-system';
@@ -8,29 +10,95 @@ import ParallaxScrollView from '@/components/ParallaxScrollView';
 import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
 
+const isJSON = (item: any) => {
+  item = typeof item !== 'string' ? JSON.stringify(item) : item;
+
+  try {
+    item = JSON.parse(item);
+  } catch (e) {
+    return false;
+  }
+  if(typeof item === 'object' && item !== null) {
+    return true;
+  }
+  return false;
+};
+
+const cxmpdfDownload = async (data: any, action: string) => {
+  const path = `${FileSystem.documentDirectory}/wp`;
+  let basedata = data.pdf;
+  let fileName = data.fileName;
+  let foldername = data.folderName;
+  console.log("cxmpdfdownload data", basedata);
+  console.log("cxmpdfdownload foldername", foldername);
+  console.log("cxmpdfdownload filename", fileName);
+
+  const downloadPath = `${path}/download/${foldername}`;
+  const readyToUploadPath = `${path}/readyToUpload`;
+  const redlinePath = `${path}/redline`;
+
+  // Create directories if they don't exist
+  try {
+    await FileSystem.makeDirectoryAsync(downloadPath, { intermediates: true });
+    await FileSystem.makeDirectoryAsync(readyToUploadPath, { intermediates: true });
+    await FileSystem.makeDirectoryAsync(redlinePath, { intermediates: true });
+
+    if (action === "PDFDOWNLOAD") {
+      await FileSystem.writeAsStringAsync(
+        `${downloadPath}/${fileName}`, 
+        basedata, 
+        { encoding: FileSystem.EncodingType.Base64 }
+      );
+      return `${downloadPath}/${fileName}`;
+    }
+    else if (action === "PDFDELETE") {
+      const filePaths = [
+        `${downloadPath}/${fileName}`,
+        `${redlinePath}/${fileName}`,
+        `${readyToUploadPath}/${fileName}`
+      ];
+
+      for (const filePath of filePaths) {
+        const fileInfo = await FileSystem.getInfoAsync(filePath);
+        if (fileInfo.exists) {
+          await FileSystem.deleteAsync(filePath);
+          // StandaloneOmegaUtil.sendUpdatesToWP(filePath, fileName);
+          return filePath;
+        }
+      }
+    }
+  } catch (error) {
+    console.error('File operation error:', error);
+    throw error;
+  }
+};
+
 export default function HomeScreen() {
   const handleWebViewMessage = async (event: any) => {
     try {
-      const message = JSON.parse(event.nativeEvent.data);
-        const { data, filename } = message;
-        // Remove the data URL prefix and convert to base64
-        const base64Data = data.split(',')[1];
-        
-        // Create a temporary file path
-        const filePath = `${FileSystem.documentDirectory}${filename}`;
-        
-        // Write the base64 data to a file
-        await FileSystem.writeAsStringAsync(filePath, base64Data, {
-          encoding: FileSystem.EncodingType.Base64,
-        });
-        
-        // Share the file
-        if (await Sharing.isAvailableAsync()) {
-          await Sharing.shareAsync(filePath, {
-            mimeType: 'application/pdf',
-            dialogTitle: 'Download PDF',
-          });
+      const { data } = event.nativeEvent;
+      console.log(data);
+      if (isJSON(data)) {
+        let jsonStr = typeof data === 'string' ? data : JSON.stringify(data);
+        let jsonObj = JSON.parse(jsonStr);
+        let action = jsonObj["action"];
+        let dataObj = jsonObj["data"];
+
+        if (action === "PDFDOWNLOAD") {
+          // dataObj is already in the correct format from your web app
+          // No need to create a new object
+          const pdfPath = await cxmpdfDownload(dataObj, action);
+          
+          if (pdfPath) {
+            if (await Sharing.isAvailableAsync()) {
+              await Sharing.shareAsync(pdfPath, {
+                mimeType: 'application/pdf',
+                dialogTitle: 'Download PDF',
+              });
+            }
+          }
         }
+      }
     } catch (error) {
       console.error('Error handling WebView message:', error);
     }
@@ -52,7 +120,7 @@ export default function HomeScreen() {
 
       {/* Embedding WebView for the React app */}
       <View style={styles.webviewContainer}>
-        <ThemedText type="subtitle">Your Web App</ThemedText>
+        <ThemedText type="subtitle">App rendering a react web app</ThemedText>
         <WebView 
           source={{ uri: 'https://native-liart.vercel.app/' }} 
           style={styles.webview}
